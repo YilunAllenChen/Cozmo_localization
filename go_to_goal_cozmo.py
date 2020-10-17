@@ -137,7 +137,7 @@ async def is_kidnapped(robot: cozmo.robot):
     if robot.is_picked_up:
         robot.stop_all_motors()
         pf = ParticleFilter(grid)
-        await robot.play_anim_trigger(cozmo.anim.Triggers.CubeMovedUpset).wait_for_completed()
+        await asyncio.sleep(0.5)
         return True
     return False
 
@@ -190,7 +190,7 @@ async def run(robot: cozmo.robot.Robot):
             if await is_kidnapped(robot):
                 continue
             # Continue to move around and gain new information
-            await robot.drive_wheels(10, -10)
+            await robot.drive_wheels(20, 5)
         else:
             # Go to destination
             robot.stop_all_motors()
@@ -202,7 +202,7 @@ async def run(robot: cozmo.robot.Robot):
                 diagonal_dist_mm = math.sqrt(dx ** 2 + dy ** 2) * grid.scale
                 heading_angle = math.degrees(math.atan2(dy, dx))
                 await robot.turn_in_place(cozmo.util.degrees(heading_angle - curr_h),
-                                          speed=cozmo.util.Angle(degrees=20)).wait_for_completed()
+                                          speed=cozmo.util.Angle(degrees=40)).wait_for_completed()
                 if await is_kidnapped(robot):
                     continue
                 await robot.drive_straight(cozmo.util.distance_mm(diagonal_dist_mm),
@@ -210,7 +210,7 @@ async def run(robot: cozmo.robot.Robot):
                 if await is_kidnapped(robot):
                     continue
                 await robot.turn_in_place(cozmo.util.degrees(-heading_angle),
-                                          speed=cozmo.util.Angle(degrees=20)).wait_for_completed()
+                                          speed=cozmo.util.Angle(degrees=40)).wait_for_completed()
                 if await is_kidnapped(robot):
                     continue
                 robot.stop_all_motors()
