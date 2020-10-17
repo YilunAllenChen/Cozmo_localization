@@ -200,8 +200,8 @@ async def run(robot: cozmo.robot.Robot):
                 dx = goal_x - curr_x
                 dy = goal_y - curr_y
                 diagonal_dist_mm = math.sqrt(dx ** 2 + dy ** 2) * grid.scale
-                heading_angle = math.degrees(math.atan2(dy, dx))
-                await robot.turn_in_place(cozmo.util.degrees(heading_angle - curr_h),
+                turning_angle = math.degrees(math.atan2(dy, dx))
+                await robot.turn_in_place(cozmo.util.degrees(turning_angle - curr_h),
                                           speed=cozmo.util.Angle(degrees=40)).wait_for_completed()
                 if await is_kidnapped(robot):
                     continue
@@ -209,10 +209,11 @@ async def run(robot: cozmo.robot.Robot):
                                             speed_mmps(50)).wait_for_completed()
                 if await is_kidnapped(robot):
                     continue
-                await robot.turn_in_place(cozmo.util.degrees(-heading_angle),
+                await robot.turn_in_place(cozmo.util.degrees(-turning_angle),
                                           speed=cozmo.util.Angle(degrees=40)).wait_for_completed()
                 if await is_kidnapped(robot):
                     continue
+                await robot.play_anim_trigger(cozmo.anim.Triggers.CodeLabHappy).wait_for_completed()
                 robot.stop_all_motors()
                 goal_reached = True
                 pf = ParticleFilter(grid)
@@ -220,6 +221,7 @@ async def run(robot: cozmo.robot.Robot):
                 if await is_kidnapped(robot):
                     continue
                 else:
+                    await robot.play_anim_trigger(cozmo.anim.Triggers.CodeLabHappy).wait_for_completed()
                     robot.stop_all_motors()
 
 
