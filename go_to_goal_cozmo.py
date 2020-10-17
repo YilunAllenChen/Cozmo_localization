@@ -18,6 +18,7 @@ import asyncio
 from PIL import Image
 
 from markers import detect, annotator
+from cozmo.util import speed_mmps
 
 from grid import CozGrid
 from gui import GUIWindow
@@ -129,6 +130,16 @@ async def marker_processing(robot, camera_settings, show_diagnostic_image=False)
     return marker_list, annotated_image
 
 
+async def is_kidnapped(robot: cozmo.robot):
+    if robot.is_picked_up:
+        global pf
+        robot.stop_all_motors()
+        pf = ParticleFilter(grid)
+        await robot.play_anim_trigger(cozmo.anim.Triggers.CubeMovedUpset).wait_for_completed()
+        return True
+    return False
+
+
 async def run(robot: cozmo.robot.Robot):
 
     global flag_odom_init, last_pose
@@ -151,103 +162,78 @@ async def run(robot: cozmo.robot.Robot):
             
     ###################
 
-    # YOUR CODE HERE
-    reached_goal = False
-    goal_inch_x, goal_inch_y, goal_h = goal  # (6, 10, 0) in inches
-    goal_x = goal_inch_x * 25.4 / grid.scale
-    goal_y = goal_inch_y * 25.4 / grid.scale
-    while True:
-        # check if cozmo is in the air right now
-        if robot.is_picked_up:
-            robot.stop_all_motors()
-            pf = ParticleFilter(grid)
-            await robot.play_anim_trigger(cozmo.anim.Triggers.CubeMovedUpset).wait_for_completed()
-            continue
-        converged = False
-        reached_goal = False
-        await robot.set_head_angle(cozmo.util.degrees(5)).wait_for_completed()
-        # Obtain odometry information
-        odo_update = compute_odometry(robot.pose)
-        # Obtain list of currently seen markers and their poses
-        marker_list, annotated_image = await marker_processing(robot, camera_settings)
-        # update the particle filter using the above information
-        current_best = pf.update(odo_update, marker_list)
-        last_pose = robot.pose
-        # update the particle filter GUI
-        gui.show_particles(pf.particles)
-        gui.show_mean(current_best[0], current_best[1], current_best[2], current_best[3])
-        gui.show_camera_image(annotated_image)
-        gui.updated.set()
-        # determine the robot's current actions based on the current state of
-        # the localization system. actively look around if the localization has
-        # not converged; drive to goal if localization has converged
-        curr_x, curr_y, curr_h, curr_confident = current_best
+    goal_x = goal[0] * 25.4 / grid.scale
+    goal_y = goal[1] * 25.4 / grid.scale
+    goal_h = goal[2]
 
-        if curr_confident:
-            converged = True
+    goal_reached = False
+    while not goal_reached:
+        if(await is_kidnapped(robot)):
+            continue
+        await robot.set_head_angle(cozmo.util.degrees(5)).wait_for_completed()
+        
+        # Get information from odometry and vision
+        odo_update = compute_odometry(robot.pose)
+        marker_list, annotated_image = await marker_processing(robot, camera_settings)
+
+        # Update the particle filter
+        m = pf.update(odo_update, marker_list)
+
+        # Update last robot pose
+        last_pose = robot.pose
+
+
+        # Update GUI
+        gui.show_camera_image(annotated_image)
+        gui.show_particles(pf.particles)
+        gui.show_mean(*m)
+        gui.updated.set()
+        curr_x, curr_y, curr_h, converged = m
 
         if not converged:
-            await robot.drive_wheels(25, 8)
-        else:  # if converged
+            if(await is_kidnapped(robot)):
+                continue
+            # Continue to move around and gain new information
+            await robot.drive_wheels(10, -10)
+        else:
+            # Go to destination
             robot.stop_all_motors()
-            await robot.drive_wheels(-25, -8, duration=0.5)
+            if not goal_reached:
 
-            if not reached_goal:
-                if robot.is_picked_up:
-                    robot.stop_all_motors()
-                    pf = ParticleFilter(grid)
-                    await robot.play_anim_trigger(cozmo.anim.Triggers.CubeMovedUpset).wait_for_completed()
+                if(await is_kidnapped(robot)):
                     continue
 
-                dist_x = goal_x - curr_x
-                dist_y = goal_y - curr_y
-                dist_diagonal = math.sqrt(dist_x ** 2 + dist_y ** 2)
-                dist_diagonal_mm = dist_diagonal * grid.scale
+                dx = goal_x - curr_x
+                dy = goal_y - curr_y
+                dist_diagonal_mm = math.sqrt(dx ** 2 + dy ** 2) * grid.scale
+                heading_angle = math.degrees(math.atan2(dy, dx))
+                
+                await robot.turn_in_place(cozmo.util.degrees(-curr_h + heading_angle),
+                                          speed=cozmo.util.Angle(degrees=20)).wait_for_completed()
 
-                heading_angle = math.degrees(math.atan2(dist_y, dist_x))
-                # time.sleep(1)
-                await robot.turn_in_place(cozmo.util.degrees(-curr_h),
-                                          speed=cozmo.util.Angle(degrees=30)).wait_for_completed()
+                if(await is_kidnapped(robot)):
+                    continue
 
-                # time.sleep(1)
-                await robot.turn_in_place(cozmo.util.degrees(heading_angle),
-                                          speed=cozmo.util.Angle(degrees=30)).wait_for_completed()
-                # time.sleep(1)
-                await robot.drive_straight(cozmo.util.distance_mm(dist_diagonal_mm + 3),
-                                           speed_mmps(30)).wait_for_completed()
-                # time.sleep(1)
-                if robot.is_picked_up:
-                    robot.stop_all_motors()
-                    pf = ParticleFilter(grid)
-                    await robot.play_anim_trigger(cozmo.anim.Triggers.CubeMovedUpset).wait_for_completed()
-                if robot.is_picked_up:
+                await robot.drive_straight(cozmo.util.distance_mm(dist_diagonal_mm),
+                                           speed_mmps(50)).wait_for_completed()
+
+                if(await is_kidnapped(robot)):
                     continue
 
                 await robot.turn_in_place(cozmo.util.degrees(-heading_angle),
-                                          speed=cozmo.util.Angle(degrees=30)).wait_for_completed()
-                # time.sleep(1)
+                                          speed=cozmo.util.Angle(degrees=20)).wait_for_completed()
 
-                if robot.is_picked_up:
-                    robot.stop_all_motors()
-                    pf = ParticleFilter(grid)
-                    await robot.play_anim_trigger(cozmo.anim.Triggers.CubeMovedUpset).wait_for_completed()
-                if robot.is_picked_up:
+                if(await is_kidnapped(robot)):
                     continue
 
-                await robot.play_anim_trigger(cozmo.anim.Triggers.CodeLabHappy).wait_for_completed()
                 robot.stop_all_motors()
                 reached_goal = True
                 pf = ParticleFilter(grid)
-            else:  # converged and reached goal
-                if robot.is_picked_up:
-                    robot.stop_all_motors()
-                    pf = ParticleFilter(grid)
-                    await robot.play_anim_trigger(cozmo.anim.Triggers.CubeMovedUpset).wait_for_completed()
+            else: 
+                if(await is_kidnapped(robot)):
                     continue
                 else:
-                    await robot.play_anim_trigger(cozmo.anim.Triggers.CodeLabHappy).wait_for_completed()
                     robot.stop_all_motors()
-    ###################
 
 class CozmoThread(threading.Thread):
     
