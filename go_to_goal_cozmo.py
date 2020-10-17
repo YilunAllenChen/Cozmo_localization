@@ -27,7 +27,8 @@ from setting import *
 from particle_filter import *
 from utils import *
 
-#particle filter functionality
+
+# particle filter functionality
 class ParticleFilter:
 
     def __init__(self, grid):
@@ -35,7 +36,6 @@ class ParticleFilter:
         self.grid = grid
 
     def update(self, odom, r_marker_list):
-
         # ---------- Motion model update ----------
         self.particles = motion_update(self.particles, odom)
 
@@ -47,18 +47,20 @@ class ParticleFilter:
         m_x, m_y, m_h, m_confident = compute_mean_pose(self.particles)
         return (m_x, m_y, m_h, m_confident)
 
+
 # tmp cache
-last_pose = cozmo.util.Pose(0,0,0,angle_z=cozmo.util.Angle(degrees=0))
+last_pose = cozmo.util.Pose(0, 0, 0, angle_z=cozmo.util.Angle(degrees=0))
 flag_odom_init = False
 
 # goal location for the robot to drive to, (x, y, theta)
-goal = (6,10,0)
+goal = (6, 10, 0)
 
 # map
 Map_filename = "map_arena.json"
 grid = CozGrid(Map_filename)
 gui = GUIWindow(grid, show_camera=True)
 pf = ParticleFilter(grid)
+
 
 def compute_odometry(curr_pose, cvt_inch=True):
     '''
@@ -73,11 +75,11 @@ def compute_odometry(curr_pose, cvt_inch=True):
 
     global last_pose, flag_odom_init
     last_x, last_y, last_h = last_pose.position.x, last_pose.position.y, \
-        last_pose.rotation.angle_z.degrees
+                             last_pose.rotation.angle_z.degrees
     curr_x, curr_y, curr_h = curr_pose.position.x, curr_pose.position.y, \
-        curr_pose.rotation.angle_z.degrees
-    
-    dx, dy = rotate_point(curr_x-last_x, curr_y-last_y, -last_h)
+                             curr_pose.rotation.angle_z.degrees
+
+    dx, dy = rotate_point(curr_x - last_x, curr_y - last_y, -last_h)
     if cvt_inch:
         dx, dy = dx / grid.scale, dy / grid.scale
 
@@ -109,13 +111,13 @@ async def marker_processing(robot, camera_settings, show_diagnostic_image=False)
     # Convert the image to grayscale
     image = np.array(image_event.image)
     image = color.rgb2gray(image)
-    
+
     # Detect the markers
     markers, diag = detect.detect_markers(image, camera_settings, include_diagnostics=True)
 
     # Measured marker list for the particle filter, scaled by the grid scale
     marker_list = [marker['xyh'] for marker in markers]
-    marker_list = [(x/grid.scale, y/grid.scale, h) for x,y,h in marker_list]
+    marker_list = [(x / grid.scale, y / grid.scale, h) for x, y, h in marker_list]
 
     # Annotate the camera image with the markers
     if not show_diagnostic_image:
@@ -131,8 +133,8 @@ async def marker_processing(robot, camera_settings, show_diagnostic_image=False)
 
 
 async def is_kidnapped(robot: cozmo.robot):
+    global pf
     if robot.is_picked_up:
-        global pf
         robot.stop_all_motors()
         pf = ParticleFilter(grid)
         await robot.play_anim_trigger(cozmo.anim.Triggers.CubeMovedUpset).wait_for_completed()
@@ -141,7 +143,6 @@ async def is_kidnapped(robot: cozmo.robot):
 
 
 async def run(robot: cozmo.robot.Robot):
-
     global flag_odom_init, last_pose
     global grid, gui, pf
 
@@ -155,34 +156,29 @@ async def run(robot: cozmo.robot.Robot):
     fx, fy = robot.camera.config.focal_length.x_y
     cx, cy = robot.camera.config.center.x_y
     camera_settings = np.array([
-        [fx,  0, cx],
-        [ 0, fy, cy],
-        [ 0,  0,  1]
+        [fx, 0, cx],
+        [0, fy, cy],
+        [0, 0, 1]
     ], dtype=np.float)
-            
+
     ###################
 
     goal_x = goal[0] * 25.4 / grid.scale
     goal_y = goal[1] * 25.4 / grid.scale
-    goal_h = goal[2]
 
     goal_reached = False
     while not goal_reached:
-        if(await is_kidnapped(robot)):
+        if await is_kidnapped(robot):
             continue
         await robot.set_head_angle(cozmo.util.degrees(5)).wait_for_completed()
-        
-        # Get information from odometry and vision
+
+        # Obtain odometry information
         odo_update = compute_odometry(robot.pose)
+        # Obtain list of currently seen markers and their poses
         marker_list, annotated_image = await marker_processing(robot, camera_settings)
-
-        # Update the particle filter
+        # Update the particle filter using the aboce information
         m = pf.update(odo_update, marker_list)
-
-        # Update last robot pose
         last_pose = robot.pose
-
-
         # Update GUI
         gui.show_camera_image(annotated_image)
         gui.show_particles(pf.particles)
@@ -191,7 +187,7 @@ async def run(robot: cozmo.robot.Robot):
         curr_x, curr_y, curr_h, converged = m
 
         if not converged:
-            if(await is_kidnapped(robot)):
+            if await is_kidnapped(robot):
                 continue
             # Continue to move around and gain new information
             await robot.drive_wheels(10, -10)
@@ -199,44 +195,36 @@ async def run(robot: cozmo.robot.Robot):
             # Go to destination
             robot.stop_all_motors()
             if not goal_reached:
-
-                if(await is_kidnapped(robot)):
+                if await is_kidnapped(robot):
                     continue
-
                 dx = goal_x - curr_x
                 dy = goal_y - curr_y
-                dist_diagonal_mm = math.sqrt(dx ** 2 + dy ** 2) * grid.scale
+                diagonal_dist_mm = math.sqrt(dx ** 2 + dy ** 2) * grid.scale
                 heading_angle = math.degrees(math.atan2(dy, dx))
-                
-                await robot.turn_in_place(cozmo.util.degrees(-curr_h + heading_angle),
+                await robot.turn_in_place(cozmo.util.degrees(heading_angle - curr_h),
                                           speed=cozmo.util.Angle(degrees=20)).wait_for_completed()
-
-                if(await is_kidnapped(robot)):
+                if await is_kidnapped(robot):
                     continue
-
-                await robot.drive_straight(cozmo.util.distance_mm(dist_diagonal_mm),
-                                           speed_mmps(50)).wait_for_completed()
-
-                if(await is_kidnapped(robot)):
+                await robot.drive_straight(cozmo.util.distance_mm(diagonal_dist_mm),
+                                            speed_mmps(50)).wait_for_completed()
+                if await is_kidnapped(robot):
                     continue
-
                 await robot.turn_in_place(cozmo.util.degrees(-heading_angle),
                                           speed=cozmo.util.Angle(degrees=20)).wait_for_completed()
-
-                if(await is_kidnapped(robot)):
+                if await is_kidnapped(robot):
                     continue
-
                 robot.stop_all_motors()
-                reached_goal = True
+                goal_reached = True
                 pf = ParticleFilter(grid)
-            else: 
-                if(await is_kidnapped(robot)):
+            else:
+                if await is_kidnapped(robot):
                     continue
                 else:
                     robot.stop_all_motors()
 
+
 class CozmoThread(threading.Thread):
-    
+
     def __init__(self):
         threading.Thread.__init__(self, daemon=False)
 
@@ -246,7 +234,6 @@ class CozmoThread(threading.Thread):
 
 
 if __name__ == '__main__':
-
     # cozmo thread
     cozmo_thread = CozmoThread()
     cozmo_thread.start()
@@ -255,4 +242,3 @@ if __name__ == '__main__':
     gui.show_particles(pf.particles)
     gui.show_mean(0, 0, 0)
     gui.start()
-
