@@ -1,4 +1,3 @@
-from itertools import product
 from grid import *
 from particle import Particle
 from utils import *
@@ -105,7 +104,7 @@ def measurement_update(particles, measured_marker_list, grid):
         Returns: the list of particles represents belief p(x_{t} | u_{t})
                 after measurement update
     """
-    EXPLORATION_NUM = 25
+    EXPLORATION_NUM = 30
     measured_particles = []
     weights = []
 
@@ -118,7 +117,10 @@ def measurement_update(particles, measured_marker_list, grid):
                 r_markers = measured_marker_list.copy()
                 while len(r_markers) > 0 and len(p_markers) > 0 :
                     # Iterate through all particle markers/robot markers pairs and select the best particles
-                    pr_pairs = product(p_markers, r_markers)
+                    pr_pairs = []
+                    for p_m in p_markers:
+                        for r_m in r_markers:
+                            pr_pairs.append(p_m, r_m)
                     p_marker, r_marker = min(pr_pairs, key=lambda pos: grid_distance(
                         pos[0][0], pos[0][1], pos[1][0], pos[1][1]))
 
@@ -136,7 +138,7 @@ def measurement_update(particles, measured_marker_list, grid):
                     r_markers.remove(r_marker)
 
                 # Take into consideration false positives and true negatives
-                assigned_weight = 1.
+                assigned_weight = 1.0
                 false_prob = setting.DETECTION_FAILURE_RATE * setting.SPURIOUS_DETECTION_RATE
                 for prob in probs:
                     assigned_weight = prob if prob > false_prob else false_prob
@@ -147,7 +149,7 @@ def measurement_update(particles, measured_marker_list, grid):
             else:
                 weights.append(0.0)
     else:
-        weights = [1.0] * len(particles)
+        weights = [1.0 for _ in range(len(particles))]
 
     # Normalize all weights so we can use it in random.choice
     normalization_factor = float(sum(weights))
